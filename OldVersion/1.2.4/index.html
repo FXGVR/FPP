@@ -1,0 +1,148 @@
+<!doctype html>
+<!-- FXG Video tech 2026(c) 西顾视频科技有限公司 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FXGVR 媒体查看器</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-panel" aria-label="全景媒体查看器控制面板">
+        <div class="brand">
+          <div class="brand-top">
+            <button id="languageButton" class="language-button" type="button" aria-label="切换中英文">中/E</button>
+            <p class="eyebrow">FXG PANO VIEWER</p>
+          </div>
+          <h1 data-i18n="appTitle">FXG 全景图片/视频播放器</h1>
+          <p class="lede" data-i18n="lede">
+            支持 2:1 ERP 图片、360 视频、本地文件和 URL。拖动看四周，滚轮缩放视角。
+          </p>
+        </div>
+
+        <div class="controls" aria-label="媒体加载控制">
+          <label class="file-button">
+            <input id="mediaFileInput" type="file" accept="image/*,video/*,.mp4,.m4v,.mov,.webm,.ogv,.ogg">
+            <span data-i18n="openLocal">打开本地文件</span>
+          </label>
+
+          <form id="urlForm" class="url-form">
+            <label class="sr-only" for="urlInput">媒体 URL</label>
+            <input
+              id="urlInput"
+              type="url"
+              inputmode="url"
+              placeholder="https://example.com/panorama.mp4"
+              data-i18n-placeholder="urlPlaceholder"
+              autocomplete="url"
+            >
+            <button type="submit" data-i18n="openUrl">打开 URL</button>
+          </form>
+        </div>
+
+        <div class="zoom-row">
+          <label for="zoomInput" data-i18n="fov">视角宽度</label>
+          <input id="zoomInput" type="range" min="15" max="120" value="72">
+          <span id="zoomValue">72°</span>
+        </div>
+
+        <div class="projection-row">
+          <label for="projectionSelect" data-i18n="projection">投影格式</label>
+          <select id="projectionSelect">
+            <option value="erp360" data-i18n="projectionErp360">ERP360 2D（2:1）</option>
+            <option value="erp360-tb" data-i18n="projectionErp360Tb">ERP360 3D 上下（1:1）</option>
+            <option value="vr180" data-i18n="projectionVr180">VR180 2D（1:1）</option>
+            <option value="vr180-sbs" data-i18n="projectionVr180Sbs">VR180 3D 左右（2:1）</option>
+            <option value="flat" data-i18n="projectionFlat">Non VR 普通矩形</option>
+            <option value="flat-sbs" data-i18n="projectionFlatSbs">Non VR 3D 左右</option>
+            <option value="flat-tb" data-i18n="projectionFlatTb">Non VR 3D 上下</option>
+            <option value="eac" data-i18n="projectionEac">EAC 2D（YouTube 3×2）</option>
+            <option value="eac-tb" data-i18n="projectionEacTb">EAC 3D 上下（YouTube 3×2）</option>
+          </select>
+        </div>
+
+        <div class="video-panel" aria-label="视频播放参数">
+          <div class="video-actions">
+            <label class="toggle">
+              <input id="muteInput" type="checkbox" autocomplete="off">
+              <span data-i18n="mute">静音</span>
+            </label>
+            <label class="toggle">
+              <input id="loopInput" type="checkbox">
+              <span data-i18n="loop">循环</span>
+            </label>
+            <label class="speed-control" for="speedInput">
+              <span data-i18n="speed">速度</span>
+              <select id="speedInput">
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="quick-actions" aria-label="视角参数">
+          <button id="gyroButton" type="button" data-i18n="gyro">陀螺仪</button>
+          <label class="select-control" for="xrScaleSelect" title="倍率越高越清晰，也越消耗 Quest 性能" data-i18n-title="xrClarityTitle">
+            <span data-i18n="xrClarity">XR 清晰度</span>
+            <select id="xrScaleSelect">
+              <option value="1" data-i18n="xrStandard">标准 1.0×</option>
+              <option value="native" selected data-i18n="xrNative">原生推荐</option>
+              <option value="1.5" data-i18n="xrEnhanced">增强 1.5×</option>
+              <option value="2" data-i18n="xrUltra">超清 2.0×</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="autorotateInput" type="checkbox">
+            <span data-i18n="autorotate">自动旋转</span>
+          </label>
+          <label class="toggle">
+            <input id="flipInput" type="checkbox">
+            <span data-i18n="flip">水平翻转</span>
+          </label>
+        </div>
+
+        <div class="hint-panel" aria-label="操作提示">
+          <span data-i18n="hintDrop">拖拽文件播放</span>
+          <span data-i18n="hintDrag">拖拽环视</span>
+          <span data-i18n="hintPinch">双指缩放</span>
+          <span data-i18n="hintWheel">滚轮缩放</span>
+          <span data-i18n="hintArrow">方向键微调</span>
+          <span data-i18n="hintSpace">空格播放</span>
+          <span data-i18n="hintReset">0 重置</span>
+        </div>
+
+        <p id="status" class="status" role="status" aria-live="polite" data-i18n="defaultStatus">
+          已载入内置测试全景。换一张图片或 360 ERP 视频试试，入口就在上面。
+        </p>
+      </section>
+
+      <section class="viewer-card" aria-label="全景画布">
+        <canvas id="panoCanvas"></canvas>
+        <div class="viewer-actions" aria-label="主画面控制">
+          <button id="resetButton" type="button" data-i18n="reset">重置视角</button>
+          <button id="fullscreenButton" type="button" data-i18n="fullscreen">全屏</button>
+          <button id="xrButton" type="button" disabled data-i18n="enterXr">进入 XR</button>
+        </div>
+        <div id="dropOverlay" class="drop-overlay" aria-hidden="true">
+          <strong data-i18n="dropTitle">松开鼠标，直接载入播放</strong>
+          <span data-i18n="dropSubtitle">自动识别图片或视频；视频会尝试自动播放</span>
+        </div>
+        <div id="viewerProgress" class="viewer-progress" aria-hidden="true">
+          <span id="viewerCurrentTime">0:00</span>
+          <input id="viewerTimelineInput" type="range" min="0" max="1000" value="0" disabled>
+          <span id="viewerDurationTime">0:00</span>
+        </div>
+        <button id="viewerPlayButton" class="viewer-play-button" type="button" disabled aria-label="播放或暂停视频" data-i18n-aria-label="playPauseVideo">
+          <span class="play-icon" aria-hidden="true"></span>
+        </button>
+      </section>
+    </main>
+
+    <noscript>这个查看器需要启用 JavaScript。</noscript>
+    <script src="./app.js"></script>
+  </body>
+</html>

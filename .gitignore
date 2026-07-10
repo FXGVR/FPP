@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Local test media
+test-assets/
+
+# Editor and local environment
+.vscode/
+.idea/
+.env
+.env.*
+
+# Logs and temporary files
+*.log
+*.tmp
