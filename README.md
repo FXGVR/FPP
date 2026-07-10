@@ -13,7 +13,7 @@
 云端长期地址
 https://vh.fxgvr.com/fpp.html
 
-也可以下载到本地直接双击 `index.html`，或在项目目录启动本地静态服务器：
+也可以下载到本地直接双击`fpp.html` 或 `index.html`，或在项目目录启动本地静态服务器：
 
 ```sh
 python3 -m http.server 8765
