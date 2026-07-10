@@ -5,9 +5,10 @@
 
 支持全景ERP/EAC的360/180度视频/图片
 支持各种3D格式，支持WebXR沉浸式播放
-支持Win/Mac/iOS/Android/XR/VisionPro全平台播放
+支持Win/Mac/iOS/Android/XR/VisionPro/Pico/Quest 全平台播放
 
-可以作为本地视频播放器，也可以通过 ?URL= 播放在线视频/直播/图片
+可以作为本地视频播放器打开本地媒体（或者拖拽文件进入窗口），
+也可以通过 ?URL= 播放在线视频/直播/图片
 
 ## 使用
 云端长期地址
