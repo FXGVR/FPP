@@ -1,7 +1,7 @@
-# FXG 轻量话浏览器 360 ERP 全景媒体查看器
+# FXG 轻量360全景媒体查看器
 
 这是一个纯HTML文件（90k/gz后仅20k）零依赖的静态网页全景查看器，
-玩群绿色开源（https://github.com/leewensong/FxgPanoPlayer-FPP）
+完全绿色开源（https://github.com/leewensong/FxgPanoPlayer-FPP）
 
 支持全景ERP/EAC的360/180度视频/图片
 支持各种3D格式，支持WebXR沉浸式播放
