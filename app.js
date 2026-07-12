@@ -79,6 +79,16 @@ const translations = {
     xrHudNoProgress: "无视频进度",
     xrHudPlaying: "播放中",
     xrHudPaused: "已暂停",
+    xrHudNowPlaying: "正在播放",
+    xrHudReady: "准备就绪",
+    xrHudPlay: "播放",
+    xrHudPause: "暂停",
+    xrHudRewind: "后退 10 秒",
+    xrHudForward: "前进 10 秒",
+    xrHudSpeed: "倍速",
+    xrHudHide: "收起",
+    xrHudRecenter: "面板归位",
+    xrHudImageHint: "图片模式 · 使用投影和翻转校正画面",
     xrHudProjection: "投影",
     xrHudFov: "视角",
     xrHudResolution: "分辨率",
@@ -91,7 +101,7 @@ const translations = {
     xrHudPrevProjection: "上一项",
     xrHudNextProjection: "下一项",
     xrHudExit: "退出沉浸",
-    xrHudTriggerHint: "用控制器扳机选择；按住进度条可拖动",
+    xrHudTriggerHint: "点按选择 · 拖动进度 · 顶部拖移 · 点按面板外空白处隐藏 / 恢复",
     dropTitle: "松开鼠标，直接载入播放",
     dropSubtitle: "自动识别图片或视频；视频会尝试自动播放",
     playVideo: "播放视频",
@@ -147,6 +157,16 @@ const translations = {
     xrHudNoProgress: "No video timeline",
     xrHudPlaying: "Playing",
     xrHudPaused: "Paused",
+    xrHudNowPlaying: "Now playing",
+    xrHudReady: "Ready",
+    xrHudPlay: "Play",
+    xrHudPause: "Pause",
+    xrHudRewind: "Back 10 sec",
+    xrHudForward: "Forward 10 sec",
+    xrHudSpeed: "Speed",
+    xrHudHide: "Hide",
+    xrHudRecenter: "Recenter panel",
+    xrHudImageHint: "Image mode · Adjust projection or horizontal flip",
     xrHudProjection: "Projection",
     xrHudFov: "FOV",
     xrHudResolution: "Resolution",
@@ -159,7 +179,7 @@ const translations = {
     xrHudPrevProjection: "Previous",
     xrHudNextProjection: "Next",
     xrHudExit: "Exit VR",
-    xrHudTriggerHint: "Use trigger to select; hold the timeline to scrub",
+    xrHudTriggerHint: "Select · Drag timeline · Drag header · Select outside to hide / restore",
     dropTitle: "Release to load and play",
     dropSubtitle: "Images and videos are detected automatically; videos will try to autoplay.",
     playVideo: "Play video",
@@ -220,7 +240,15 @@ const state = {
   xrPanel: null,
   xrPanelElements: [],
   xrPanelActiveId: "",
+  xrPanelHoverId: "",
   xrPanelDrag: null,
+  xrPendingAction: null,
+  xrPanelHidden: false,
+  xrProjectionMenuOpen: false,
+  xrSpeedMenuOpen: false,
+  xrToast: null,
+  xrLastScrubSeek: 0,
+  xrPointerHits: [],
   fullscreenOnLoad: false,
   fullscreenRequested: false,
   muteRequestedByQuery: false,
@@ -432,6 +460,50 @@ const overlayLocations = {
   texture: gl.getUniformLocation(overlayProgram, "uTexture"),
 };
 const overlayBuffer = gl.createBuffer();
+const xrPointerVertexShaderSource = `
+  attribute vec3 aPosition;
+  attribute vec3 aColor;
+
+  uniform mat4 uMvp;
+  uniform float uPointSize;
+
+  varying vec3 vColor;
+
+  void main() {
+    vColor = aColor;
+    gl_PointSize = uPointSize;
+    gl_Position = uMvp * vec4(aPosition, 1.0);
+  }
+`;
+const xrPointerFragmentShaderSource = `
+  #ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+  #else
+    precision mediump float;
+  #endif
+
+  varying vec3 vColor;
+  uniform bool uRoundPoint;
+
+  void main() {
+    if (uRoundPoint) {
+      vec2 offset = gl_PointCoord - vec2(0.5);
+      if (dot(offset, offset) > 0.25) {
+        discard;
+      }
+    }
+    gl_FragColor = vec4(vColor, 1.0);
+  }
+`;
+const xrPointerProgram = createProgram(gl, xrPointerVertexShaderSource, xrPointerFragmentShaderSource);
+const xrPointerLocations = {
+  position: gl.getAttribLocation(xrPointerProgram, "aPosition"),
+  color: gl.getAttribLocation(xrPointerProgram, "aColor"),
+  mvp: gl.getUniformLocation(xrPointerProgram, "uMvp"),
+  pointSize: gl.getUniformLocation(xrPointerProgram, "uPointSize"),
+  roundPoint: gl.getUniformLocation(xrPointerProgram, "uRoundPoint"),
+};
+const xrPointerBuffer = gl.createBuffer();
 const xrHudCanvas = document.createElement("canvas");
 xrHudCanvas.width = 1024;
 xrHudCanvas.height = 512;
@@ -1294,6 +1366,7 @@ function render(time) {
     return;
   }
 
+  restoreDesktopFramebuffer();
   resizeCanvas();
   updateVideoTexture();
   drawScene({
@@ -1304,6 +1377,13 @@ function render(time) {
   });
 
   requestAnimationFrame(render);
+}
+
+function restoreDesktopFramebuffer() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.colorMask(true, true, true, true);
 }
 
 function drawScene({ viewport, projectionMatrix, viewMatrix: sceneViewMatrix, clear = true, xrEye = 0 }) {
@@ -1342,6 +1422,11 @@ function drawXRHudOverlay({ viewport, projectionMatrix, viewMatrix: xrViewMatrix
   }
 
   ensureXRPanel(viewTransformMatrix);
+
+  if (state.xrPanelHidden) {
+    return;
+  }
+
   updateXRHudTexture(time);
 
   const vertices = createXRPanelVertices();
@@ -1374,9 +1459,12 @@ function ensureXRPanel(viewTransformMatrix) {
   }
 
   const eye = [viewTransformMatrix[12], viewTransformMatrix[13], viewTransformMatrix[14]];
-  const right = normalizeVec3([viewTransformMatrix[0], viewTransformMatrix[1], viewTransformMatrix[2]]);
-  const up = normalizeVec3([viewTransformMatrix[4], viewTransformMatrix[5], viewTransformMatrix[6]]);
-  const forward = normalizeVec3([-viewTransformMatrix[8], -viewTransformMatrix[9], -viewTransformMatrix[10]]);
+  const rawForward = [-viewTransformMatrix[8], 0, -viewTransformMatrix[10]];
+  const forward = Math.hypot(rawForward[0], rawForward[2]) > 0.001
+    ? normalizeVec3(rawForward)
+    : [0, 0, -1];
+  const right = normalizeVec3(crossVec3(forward, [0, 1, 0]));
+  const up = [0, 1, 0];
   const panelWidth = 1.86;
   const panelHeight = panelWidth * (xrHudCanvas.height / xrHudCanvas.width);
   const center = addVec3(addVec3(eye, scaleVec3(forward, 2.15)), scaleVec3(up, -0.28));
@@ -1419,7 +1507,7 @@ function xrPanelPointToWorld(x, y) {
 }
 
 function updateXRHudTexture(time) {
-  const updateInterval = state.mediaType === "video" && state.videoReady && !video.paused ? 180 : 500;
+  const updateInterval = state.mediaType === "video" && state.videoReady && !video.paused ? 120 : 500;
 
   if (!state.xrHudDirty && time - state.xrHudLastUpdate < updateInterval) {
     return;
@@ -1446,76 +1534,190 @@ function drawXRHudCanvas() {
   const resolution = sourceWidth && sourceHeight ? `${sourceWidth}×${sourceHeight}` : "-";
   const speed = speedInput.selectedOptions[0] ? speedInput.selectedOptions[0].textContent : `${video.playbackRate || 1}×`;
   const modeLabel = state.mediaType === "video" ? t("xrHudVideo") : t("xrHudImageMode");
-  const playLabel = state.mediaType === "video" && state.videoReady
-    ? (video.paused ? t("xrHudPaused") : t("xrHudPlaying"))
-    : t("xrHudNoProgress");
-  const playButtonLabel = video.paused ? t("playVideo") : t("pauseVideo");
+  const isPlayableVideo = state.mediaType === "video" && state.videoReady;
+  const canSeekVideo = isPlayableVideo && isFiniteDuration(video.duration);
+  const isPlaying = isPlayableVideo && !video.paused;
+  const eyebrow = isPlayableVideo ? (isPlaying ? t("xrHudNowPlaying") : t("xrHudPaused")) : t("xrHudReady");
+  const playButtonLabel = isPlaying ? t("xrHudPause") : t("xrHudPlay");
+  const accent = "#60a5fa";
+  if (!isPlayableVideo) {
+    state.xrSpeedMenuOpen = false;
+  }
 
   state.xrPanelElements = [];
 
   ctx.clearRect(0, 0, width, height);
   ctx.save();
-  ctx.shadowColor = "rgba(0, 0, 0, 0.34)";
-  ctx.shadowBlur = 28;
-  ctx.shadowOffsetY = 10;
-  ctx.fillStyle = "rgba(4, 13, 17, 0.82)";
-  fillRoundedRect(ctx, 22, 20, width - 44, height - 40, 32);
+  ctx.shadowColor = "rgba(0, 0, 0, 0.46)";
+  ctx.shadowBlur = 34;
+  ctx.shadowOffsetY = 14;
+  ctx.fillStyle = "rgba(8, 13, 24, 0.94)";
+  fillRoundedRect(ctx, 18, 16, width - 36, height - 32, 36);
   ctx.restore();
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.10)";
-  fillRoundedRect(ctx, 48, 82, width - 96, 96, 24);
-  ctx.fillStyle = "rgba(255, 250, 239, 0.08)";
-  fillRoundedRect(ctx, 48, 198, width - 96, 94, 24);
-  ctx.fillStyle = "rgba(255, 250, 239, 0.08)";
-  fillRoundedRect(ctx, 48, 310, width - 96, 68, 24);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+  fillRoundedRect(ctx, 44, 34, width - 88, 104, 26);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.045)";
+  fillRoundedRect(ctx, 44, 154, width - 88, 76, 22);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.045)";
+  fillRoundedRect(ctx, 44, 250, width - 88, 164, 26);
 
-  ctx.fillStyle = "#fffaf1";
-  ctx.font = "800 34px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  ctx.fillStyle = "rgba(148, 163, 184, 0.55)";
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < 2; column += 1) {
+      ctx.beginPath();
+      ctx.arc(58 + column * 6, 58 + row * 7, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.fillStyle = isPlaying ? accent : "rgba(191, 219, 254, 0.86)";
+  ctx.font = "800 18px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
   ctx.textBaseline = "alphabetic";
-  drawTruncatedText(ctx, t("xrHudTitle"), 56, 56, 520);
+  ctx.fillText(eyebrow.toUpperCase(), 72, 66);
 
-  drawXRHudButton("exit", t("xrHudExit"), width - 214, 28, 158, 48, true);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "800 31px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  ctx.textBaseline = "alphabetic";
+  drawTruncatedText(ctx, mediaName, 72, 105, 490);
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.84)";
-  ctx.font = "800 27px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
-  drawTruncatedText(ctx, mediaName, 68, 124, width - 136);
+  drawXRHudPill(modeLabel, 584, 60, 112, 36, isPlaying);
+  drawXRHudPill(resolution, 706, 60, 140, 36, false);
+  drawXRHudIconButton("recenter", "recenter", 856, 50, 50, 50, false, t("xrHudRecenter"));
+  drawXRHudIconButton("hide", "minus", 916, 50, 50, 50, false, t("xrHudHide"));
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.66)";
-  ctx.font = "700 21px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
-  drawTruncatedText(ctx, `${t("xrHudFov")}: ${Math.round(state.targetFov)}°`, 68, 160, 170);
-  drawTruncatedText(ctx, `${t("xrHudResolution")}: ${resolution}`, 260, 160, 270);
-  drawXRHudPill(modeLabel, width - 232, 132, 164, 38, modeLabel === t("xrHudVideo"));
+  drawXRHudButton("projection-menu", `${t("xrHudProjection")}  ·  ${projectionLabel}  ▾`, 58, 168, 590, 48, state.xrProjectionMenuOpen);
+  if (isPlayableVideo) {
+    drawXRHudButton("speed-menu", `${t("xrHudSpeed")}  ${speed}  ▾`, 662, 168, 146, 48, state.xrSpeedMenuOpen);
+    drawXRHudIconButton("loop", "loop", 822, 168, 64, 48, loopInput.checked, loopInput.checked ? t("xrHudLoopOn") : t("xrHudLoopOff"));
+    drawXRHudIconButton("mute", muteInput.checked ? "muted" : "volume", 900, 168, 64, 48, muteInput.checked, muteInput.checked ? t("xrHudMuteOn") : t("xrHudMuteOff"));
+  } else {
+    drawXRHudButton("flip", t("flip"), 662, 168, 302, 48, flipInput.checked);
+  }
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.72)";
-  ctx.font = "800 22px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
-  ctx.fillText(t("xrHudProjection"), 68, 228);
-  drawXRHudButton("projection-prev", t("xrHudPrevProjection"), 68, 238, 132, 46, false);
-  drawXRHudSelection(projectionLabel, 216, 238, 592, 46);
-  drawXRHudButton("projection-next", t("xrHudNextProjection"), 824, 238, 132, 46, false);
+  if (state.xrProjectionMenuOpen) {
+    drawXRProjectionMenu();
+    drawXRHudFooter();
+    return;
+  }
 
-  const muteLabel = muteInput.checked ? t("xrHudMuteOn") : t("xrHudMuteOff");
-  const loopLabel = loopInput.checked ? t("xrHudLoopOn") : t("xrHudLoopOff");
-  drawXRHudButton("play-pause", playButtonLabel, 68, 322, 154, 46, state.mediaType === "video" && state.videoReady && !video.paused);
-  drawXRHudPill(playLabel, 238, 322, 150, 46, state.mediaType === "video" && state.videoReady && !video.paused);
-  drawXRHudPill(muteLabel, 404, 322, 118, 46, !muteInput.checked);
-  drawXRHudPill(loopLabel, 538, 322, 118, 46, loopInput.checked);
-  drawXRHudPill(speed, 672, 322, 96, 46, false);
+  if (state.xrSpeedMenuOpen) {
+    drawXRSpeedMenu();
+    drawXRHudFooter();
+    return;
+  }
 
-  drawXRHudProgress(68, 432, width - 136, 28);
+  drawXRHudHoverTooltip();
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.46)";
-  ctx.font = "700 18px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  if (isPlayableVideo) {
+    drawXRHudProgress(72, 290, width - 144, 18);
+    drawXRHudIconButton("rewind", "rewind", 270, 334, 86, 62, false, t("xrHudRewind"), canSeekVideo);
+    drawXRHudPlayButton("play-pause", playButtonLabel, 377, 326, 270, 76, isPlaying, true);
+    drawXRHudIconButton("forward", "forward", 668, 334, 86, 62, false, t("xrHudForward"), canSeekVideo);
+  } else {
+    drawXRHudIcon("image", width / 2, 306, "#93c5fd", 1.4);
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "800 26px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(t("xrHudImageMode"), width / 2, 352);
+    ctx.fillStyle = "rgba(203, 213, 225, 0.68)";
+    ctx.font = "700 17px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    ctx.fillText(t("xrHudImageHint"), width / 2, 384);
+    ctx.textAlign = "start";
+  }
+
+  drawXRHudFooter();
+}
+
+function drawXRHudFooter() {
+  const ctx = xrHudContext;
+  if (state.xrToast && state.xrToast.until > performance.now()) {
+    ctx.fillStyle = state.xrToast.type === "error" ? "rgba(127, 29, 29, 0.94)" : "rgba(15, 23, 42, 0.94)";
+    fillRoundedRect(ctx, 58, 448, 838, 44, 18);
+    ctx.fillStyle = "rgba(219, 234, 254, 0.94)";
+    ctx.font = "800 17px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawTruncatedText(ctx, state.xrToast.text, 477, 470, 790, "center");
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+  } else {
+    ctx.fillStyle = "rgba(203, 213, 225, 0.62)";
+    ctx.font = "700 17px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    drawTruncatedText(ctx, t("xrHudTriggerHint"), 66, 472, 820);
+  }
+
+  drawXRHudExitIconButton(916, 448, 60, 44);
+}
+
+function drawXRHudExitIconButton(x, y, width, height) {
+  drawXRHudButton("exit", "", x, y, width, height, false, { compact: true, danger: true });
+  const color = state.xrPanelActiveId === "exit" ? "#0f172a" : "#fecaca";
+  drawXRHudIcon("exit", x + width / 2, y + height / 2, color);
+}
+
+function drawXRProjectionMenu() {
+  const options = Array.from(projectionSelect.options);
+  const columns = 3;
+  const buttonWidth = 284;
+  const buttonHeight = 50;
+  const gap = 8;
+
+  ctxMenuHeading(t("xrHudProjection"));
+
+  options.forEach((option, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = 66 + column * (buttonWidth + gap);
+    const y = 266 + row * (buttonHeight + gap);
+    drawXRProjectionOption(`projection-option:${option.value}`, option.textContent, x, y, buttonWidth, buttonHeight, option.value === state.projection);
+  });
+}
+
+function drawXRProjectionOption(id, text, x, y, width, height, active) {
+  drawXRHudButton(id, "", x, y, width, height, active);
+  const ctx = xrHudContext;
+  const match = text.match(/^(.+?)\s*[（(](.+)[）)]$/);
+  const primary = match ? match[1] : text;
+  const secondary = match ? match[2] : "";
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "800 16px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(t("xrHudTriggerHint"), width / 2, 494);
+  ctx.textBaseline = "alphabetic";
+  drawTruncatedText(ctx, primary, x + width / 2, y + (secondary ? 20 : 31), width - 24, "center");
+  if (secondary) {
+    ctx.fillStyle = active ? "rgba(219, 234, 254, 0.86)" : "rgba(203, 213, 225, 0.66)";
+    ctx.font = "700 13px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    drawTruncatedText(ctx, secondary, x + width / 2, y + 39, width - 24, "center");
+  }
   ctx.textAlign = "start";
+}
+
+function drawXRSpeedMenu() {
+  const options = Array.from(speedInput.options);
+  const buttonWidth = 190;
+  const gap = 22;
+
+  ctxMenuHeading(t("xrHudSpeed"));
+  options.forEach((option, index) => {
+    const x = 99 + index * (buttonWidth + gap);
+    drawXRHudButton(`speed-option:${option.value}`, option.textContent, x, 292, buttonWidth, 72, option.value === speedInput.value);
+  });
+}
+
+function ctxMenuHeading(text) {
+  const ctx = xrHudContext;
+  ctx.fillStyle = "rgba(219, 234, 254, 0.74)";
+  ctx.font = "800 18px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  ctx.fillText(text.toUpperCase(), 68, 258);
 }
 
 function drawXRHudPill(text, x, y, width, height, active) {
   const ctx = xrHudContext;
-  ctx.fillStyle = active ? "rgba(229, 95, 42, 0.88)" : "rgba(255, 250, 239, 0.14)";
+  ctx.fillStyle = active ? "rgba(37, 99, 235, 0.92)" : "rgba(255, 255, 255, 0.09)";
   fillRoundedRect(ctx, x, y, width, height, height / 2);
-  ctx.fillStyle = active ? "#fffaf1" : "rgba(255, 250, 239, 0.78)";
-  ctx.font = "800 20px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  ctx.fillStyle = active ? "#eff6ff" : "rgba(226, 232, 240, 0.82)";
+  ctx.font = "800 17px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   drawTruncatedText(ctx, text, x + width / 2, y + height / 2 + 1, width - 24, "center");
@@ -1523,16 +1725,22 @@ function drawXRHudPill(text, x, y, width, height, active) {
   ctx.textBaseline = "alphabetic";
 }
 
-function drawXRHudButton(id, text, x, y, width, height, active) {
-  registerXRPanelElement(id, x, y, width, height);
+function drawXRHudButton(id, text, x, y, width, height, active, options = {}) {
+  registerXRPanelElement(id, x, y, width, height, options.enabled !== false);
   const ctx = xrHudContext;
   const pressed = state.xrPanelActiveId === id;
+  const hovered = state.xrPanelHoverId === id;
   ctx.fillStyle = pressed
-    ? "rgba(255, 250, 239, 0.92)"
-    : active ? "rgba(229, 95, 42, 0.90)" : "rgba(255, 250, 239, 0.16)";
-  fillRoundedRect(ctx, x, y, width, height, height / 2);
-  ctx.fillStyle = pressed ? "#10161d" : "#fffaf1";
-  ctx.font = "800 20px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+    ? "rgba(219, 234, 254, 0.98)"
+    : options.danger ? (hovered || active ? "rgba(239, 68, 68, 0.88)" : "rgba(239, 68, 68, 0.14)")
+      : active ? "rgba(37, 99, 235, 0.94)"
+        : hovered ? "rgba(96, 165, 250, 0.28)" : "rgba(255, 255, 255, 0.10)";
+  fillRoundedRect(ctx, x, y, width, height, options.compact ? height / 2 : 16);
+  if (hovered && !pressed) {
+    strokeRoundedRect(ctx, x, y, width, height, options.compact ? height / 2 : 16, options.danger ? "rgba(254, 202, 202, 0.75)" : "rgba(147, 197, 253, 0.72)", 2);
+  }
+  ctx.fillStyle = pressed ? "#0f172a" : options.danger ? "#fecaca" : "#f8fafc";
+  ctx.font = `${options.compact ? 750 : 800} ${options.compact ? 16 : 19}px Avenir Next, Gill Sans, Trebuchet MS, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   drawTruncatedText(ctx, text, x + width / 2, y + height / 2 + 1, width - 24, "center");
@@ -1540,24 +1748,167 @@ function drawXRHudButton(id, text, x, y, width, height, active) {
   ctx.textBaseline = "alphabetic";
 }
 
-function drawXRHudSelection(text, x, y, width, height) {
+function drawXRHudPlayButton(id, text, x, y, width, height, active, enabled) {
   const ctx = xrHudContext;
-  ctx.fillStyle = "rgba(255, 250, 239, 0.12)";
-  fillRoundedRect(ctx, x, y, width, height, 18);
-  ctx.strokeStyle = "rgba(255, 250, 239, 0.18)";
-  ctx.lineWidth = 2;
-  if (ctx.roundRect) {
-    ctx.beginPath();
-    ctx.roundRect(x + 1, y + 1, width - 2, height - 2, 18);
-    ctx.stroke();
+  drawXRHudButton(id, text, x, y, width, height, active, { enabled });
+  if (!enabled) {
+    ctx.fillStyle = "rgba(8, 13, 24, 0.58)";
+    fillRoundedRect(ctx, x, y, width, height, 16);
   }
-  ctx.fillStyle = "rgba(255, 250, 239, 0.88)";
-  ctx.font = "800 21px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  drawXRHudIcon(active ? "pause" : "play", x + 56, y + height / 2, active || state.xrPanelHoverId === id ? "#ffffff" : "#bfdbfe", 1.05);
+}
+
+function drawXRHudIconButton(id, icon, x, y, width, height, active, label, enabled = true) {
+  registerXRPanelElement(id, x, y, width, height, enabled, label);
+  const ctx = xrHudContext;
+  const pressed = state.xrPanelActiveId === id;
+  const hovered = state.xrPanelHoverId === id && enabled;
+  ctx.fillStyle = !enabled ? "rgba(255, 255, 255, 0.035)"
+    : pressed ? "rgba(219, 234, 254, 0.98)"
+      : active ? "rgba(37, 99, 235, 0.94)"
+        : hovered ? "rgba(96, 165, 250, 0.28)" : "rgba(255, 255, 255, 0.10)";
+  fillRoundedRect(ctx, x, y, width, height, 15);
+  if (hovered && !pressed) {
+    strokeRoundedRect(ctx, x, y, width, height, 15, "rgba(147, 197, 253, 0.72)", 2);
+  }
+  drawXRHudIcon(icon, x + width / 2, y + height / 2, !enabled ? "rgba(148, 163, 184, 0.34)" : pressed ? "#0f172a" : "#f8fafc");
+}
+
+function drawXRHudHoverTooltip() {
+  const hovered = state.xrPanelElements.find((element) => element.id === state.xrPanelHoverId && element.tooltip);
+  if (!hovered) {
+    return;
+  }
+
+  const ctx = xrHudContext;
+  ctx.font = "700 15px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  const width = clamp(ctx.measureText(hovered.tooltip).width + 32, 112, 240);
+  ctx.fillStyle = "rgba(15, 23, 42, 0.96)";
+  fillRoundedRect(ctx, 512 - width / 2, 226, width, 26, 13);
+  ctx.fillStyle = "rgba(226, 232, 240, 0.92)";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  drawTruncatedText(ctx, text, x + width / 2, y + height / 2 + 1, width - 32, "center");
+  drawTruncatedText(ctx, hovered.tooltip, 512, 239, width - 22, "center");
   ctx.textAlign = "start";
   ctx.textBaseline = "alphabetic";
+}
+
+function drawXRHudIcon(icon, cx, cy, color, scale = 1) {
+  const ctx = xrHudContext;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  if (icon === "play") {
+    ctx.beginPath();
+    ctx.moveTo(-7, -10);
+    ctx.lineTo(11, 0);
+    ctx.lineTo(-7, 10);
+    ctx.closePath();
+    ctx.fill();
+  } else if (icon === "pause") {
+    fillRoundedRect(ctx, -9, -10, 6, 20, 2);
+    fillRoundedRect(ctx, 3, -10, 6, 20, 2);
+  } else if (icon === "minus") {
+    ctx.beginPath();
+    ctx.moveTo(-9, 0);
+    ctx.lineTo(9, 0);
+    ctx.stroke();
+  } else if (icon === "recenter") {
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.moveTo(-16, 0);
+    ctx.lineTo(-7, 0);
+    ctx.moveTo(16, 0);
+    ctx.lineTo(7, 0);
+    ctx.moveTo(0, -16);
+    ctx.lineTo(0, -7);
+    ctx.moveTo(0, 16);
+    ctx.lineTo(0, 7);
+    ctx.stroke();
+  } else if (icon === "image") {
+    strokeRoundedRect(ctx, -18, -14, 36, 28, 5, color, 2.5);
+    ctx.beginPath();
+    ctx.arc(8, -6, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-14, 10);
+    ctx.lineTo(-4, 1);
+    ctx.lineTo(2, 7);
+    ctx.lineTo(8, 2);
+    ctx.lineTo(15, 10);
+    ctx.stroke();
+  } else if (icon === "exit") {
+    ctx.beginPath();
+    ctx.moveTo(-12, -12);
+    ctx.lineTo(-2, -12);
+    ctx.lineTo(-2, 12);
+    ctx.lineTo(-12, 12);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(13, 0);
+    ctx.moveTo(7, -7);
+    ctx.lineTo(14, 0);
+    ctx.lineTo(7, 7);
+    ctx.stroke();
+  } else if (icon === "volume" || icon === "muted") {
+    ctx.beginPath();
+    ctx.moveTo(-11, -5);
+    ctx.lineTo(-5, -5);
+    ctx.lineTo(3, -12);
+    ctx.lineTo(3, 12);
+    ctx.lineTo(-5, 5);
+    ctx.lineTo(-11, 5);
+    ctx.closePath();
+    ctx.stroke();
+    if (icon === "volume") {
+      ctx.beginPath();
+      ctx.arc(3, 0, 10, -0.75, 0.75);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(9, -7);
+      ctx.lineTo(19, 7);
+      ctx.moveTo(19, -7);
+      ctx.lineTo(9, 7);
+      ctx.stroke();
+    }
+  } else if (icon === "rewind" || icon === "forward") {
+    const direction = icon === "forward" ? 1 : -1;
+    ctx.beginPath();
+    ctx.arc(0, 0, 11, direction > 0 ? -2.4 : -0.75, direction > 0 ? 1.8 : 3.9, direction < 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(direction * 10, -11);
+    ctx.lineTo(direction * 16, -11);
+    ctx.lineTo(direction * 14, -5);
+    ctx.stroke();
+    ctx.font = "800 11px Avenir Next, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("10", 0, 1);
+  } else if (icon === "loop") {
+    ctx.beginPath();
+    ctx.moveTo(-12, -5);
+    ctx.bezierCurveTo(-5, -13, 7, -11, 11, -4);
+    ctx.lineTo(15, -8);
+    ctx.moveTo(11, -4);
+    ctx.lineTo(6, -6);
+    ctx.moveTo(12, 5);
+    ctx.bezierCurveTo(5, 13, -7, 11, -11, 4);
+    ctx.lineTo(-15, 8);
+    ctx.moveTo(-11, 4);
+    ctx.lineTo(-6, 6);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawXRHudProgress(x, y, width, height) {
@@ -1565,33 +1916,41 @@ function drawXRHudProgress(x, y, width, height) {
   const duration = state.mediaType === "video" && state.videoReady && isFiniteDuration(video.duration) ? video.duration : 0;
   const current = state.mediaType === "video" && state.videoReady ? video.currentTime || 0 : 0;
   const progress = duration ? clamp(current / duration, 0, 1) : 0;
-  const timeText = state.mediaType === "video" && state.videoReady
-    ? `${formatTime(current)} / ${duration ? formatTime(duration) : t("xrHudUnknownDuration")}`
-    : t("xrHudNoProgress");
+  const currentText = state.mediaType === "video" && state.videoReady ? formatTime(current) : "0:00";
+  const durationText = state.mediaType === "video" && state.videoReady
+    ? (duration ? formatTime(duration) : t("xrHudUnknownDuration"))
+    : "0:00";
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.74)";
-  ctx.font = "800 22px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
+  ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
+  ctx.font = "800 18px Avenir Next, Gill Sans, Trebuchet MS, sans-serif";
   ctx.textAlign = "start";
-  ctx.fillText(t("xrHudProgress"), x, y - 16);
+  ctx.fillText(currentText, x, y - 18);
   ctx.textAlign = "right";
-  ctx.fillText(timeText, x + width, y - 16);
+  ctx.fillText(durationText, x + width, y - 18);
 
-  ctx.fillStyle = "rgba(255, 250, 239, 0.18)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.13)";
   fillRoundedRect(ctx, x, y, width, height, height / 2);
-  ctx.fillStyle = state.mediaType === "video" ? "rgba(229, 95, 42, 0.92)" : "rgba(143, 201, 210, 0.58)";
-  fillRoundedRect(ctx, x, y, Math.max(height, width * progress), height, height / 2);
-  registerXRPanelElement("progress", x, y - 18, width, height + 36);
+  if (progress > 0) {
+    ctx.fillStyle = "rgba(59, 130, 246, 0.98)";
+    fillRoundedRect(ctx, x, y, Math.max(height, width * progress), height, height / 2);
+  }
+  registerXRPanelElement("progress", x, y - 22, width, height + 48, Boolean(duration));
 
   if (duration) {
-    ctx.fillStyle = "#fffaf1";
+    const knobX = x + width * progress;
+    ctx.save();
+    ctx.shadowColor = "rgba(37, 99, 235, 0.65)";
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = "#eff6ff";
     ctx.beginPath();
-    ctx.arc(x + width * progress, y + height / 2, 16, 0, Math.PI * 2);
+    ctx.arc(knobX, y + height / 2, state.xrPanelHoverId === "progress" ? 15 : 12, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 }
 
-function registerXRPanelElement(id, x, y, width, height) {
-  state.xrPanelElements.push({ id, x, y, width, height });
+function registerXRPanelElement(id, x, y, width, height, enabled = true, tooltip = "") {
+  state.xrPanelElements.push({ id, x, y, width, height, enabled, tooltip });
 }
 
 function drawTruncatedText(ctx, text, x, y, maxWidth, align = "start") {
@@ -1832,24 +2191,51 @@ async function toggleXR() {
     state.xrReferenceSpace = await session.requestReferenceSpace("local");
     state.xrPanel = null;
     state.xrPanelActiveId = "";
+    state.xrPanelHoverId = "";
     state.xrPanelDrag = null;
+    state.xrPendingAction = null;
+    state.xrPanelHidden = false;
+    state.xrProjectionMenuOpen = false;
+    state.xrSpeedMenuOpen = false;
+    state.xrToast = null;
+    state.xrLastScrubSeek = 0;
+    state.xrPointerHits = [];
     updateXRButtonText();
     setStatus(`已进入 WebXR 沉浸式模式。${getXRResolutionHint(state.xrBaseLayer)}`, "success");
 
     session.addEventListener("selectstart", handleXRSelectStart);
     session.addEventListener("selectend", handleXRSelectEnd);
+    session.addEventListener("inputsourceschange", handleXRInputSourcesChange);
 
     session.addEventListener("end", () => {
       session.removeEventListener("selectstart", handleXRSelectStart);
       session.removeEventListener("selectend", handleXRSelectEnd);
+      session.removeEventListener("inputsourceschange", handleXRInputSourcesChange);
+      cancelXRInteraction();
       state.xrSession = null;
       state.xrReferenceSpace = null;
       state.xrBaseLayer = null;
       state.xrPanel = null;
       state.xrPanelActiveId = "";
+      state.xrPanelHoverId = "";
       state.xrPanelDrag = null;
+      state.xrPendingAction = null;
+      state.xrPanelHidden = false;
+      state.xrProjectionMenuOpen = false;
+      state.xrSpeedMenuOpen = false;
+      state.xrToast = null;
+      state.xrLastScrubSeek = 0;
+      state.xrPointerHits = [];
       updateXRButtonText();
+      restoreDesktopFramebuffer();
       resizeCanvas();
+      state.videoNeedsTextureUpdate = true;
+      renderDesktopFrame(performance.now());
+      requestAnimationFrame((time) => {
+        if (!state.xrSession) {
+          renderDesktopFrame(time);
+        }
+      });
       setStatus("已退出 WebXR。", "success");
     });
 
@@ -1857,6 +2243,19 @@ async function toggleXR() {
   } catch (error) {
     setStatus(`无法进入 WebXR：${error.message}`, "error");
   }
+}
+
+function renderDesktopFrame(time = performance.now()) {
+  restoreDesktopFramebuffer();
+  resizeCanvas();
+  updateVideoTexture();
+  drawScene({
+    viewport: { x: 0, y: 0, width: canvas.width, height: canvas.height },
+    projectionMatrix: perspective(degToRad(state.fov), canvas.width / Math.max(1, canvas.height), 0.01, 10),
+    viewMatrix: getCurrentViewMatrix(),
+    clear: true,
+  });
+  state.lastTime = time;
 }
 
 function createXRBaseLayer(session) {
@@ -1904,45 +2303,166 @@ function getXRResolutionHint(baseLayer) {
 }
 
 function handleXRSelectStart(event) {
-  const hit = getXRPanelHit(event.inputSource, event.frame);
-
-  if (!hit || !hit.element) {
+  if ((state.xrPanelDrag && state.xrPanelDrag.inputSource !== event.inputSource)
+    || (state.xrPendingAction && state.xrPendingAction.inputSource !== event.inputSource)) {
     return;
   }
 
-  state.xrPanelActiveId = hit.element.id;
-  markXRHudDirty();
+  if (state.xrPanelHidden) {
+    state.xrPanelHidden = false;
+    state.xrPanelActiveId = "";
+    state.xrPanelHoverId = "";
+    state.xrPanelDrag = null;
+    state.xrPendingAction = null;
+    markXRHudDirty();
+    return;
+  }
 
-  if (hit.element.id === "progress") {
-    if (state.mediaType === "video" && state.videoReady && isFiniteDuration(video.duration)) {
-      state.xrPanelDrag = { inputSource: event.inputSource };
-      seekVideoFromXRPanel(hit.canvasX);
+  const ray = getXRInputRay(event.inputSource, event.frame);
+  if (!ray) {
+    return;
+  }
+
+  const hit = getXRPanelRayHit(ray.origin, ray.direction);
+
+  if (!hit) {
+    state.xrPanelHidden = true;
+    state.xrPanelActiveId = "";
+    state.xrPanelHoverId = "";
+    state.xrPanelDrag = null;
+    state.xrPendingAction = null;
+    state.xrProjectionMenuOpen = false;
+    state.xrSpeedMenuOpen = false;
+    state.xrPointerHits = [];
+    markXRHudDirty();
+    return;
+  }
+
+  const element = getXRPanelElementAt(hit.canvasX, hit.canvasY);
+
+  if (element && element.enabled !== false) {
+    state.xrPanelActiveId = element.id;
+    markXRHudDirty();
+
+    if (element.id === "progress") {
+      if (state.mediaType === "video" && state.videoReady && isFiniteDuration(video.duration)) {
+        state.xrPanelDrag = { inputSource: event.inputSource, type: "progress" };
+        seekVideoFromXRPanel(hit.canvasX);
+      }
+      return;
     }
+
+    state.xrPendingAction = {
+      inputSource: event.inputSource,
+      id: element.id,
+    };
     return;
   }
 
-  runXRPanelAction(hit.element.id);
+  if (hit.canvasY > 142) {
+    return;
+  }
+
+  const viewerPosition = getXRViewerPosition(event.frame);
+
+  if (!viewerPosition) {
+    return;
+  }
+
+  state.xrPanelDrag = {
+    inputSource: event.inputSource,
+    type: "panel",
+    initialControllerPosition: getXRInputPosition(event.inputSource, event.frame),
+    initialPanelCenter: [...state.xrPanel.center],
+  };
 }
 
 function handleXRSelectEnd(event) {
   if (state.xrPanelDrag && state.xrPanelDrag.inputSource === event.inputSource) {
-    const hit = getXRPanelHit(event.inputSource, event.frame);
+    if (state.xrPanelDrag.type === "progress") {
+      const hit = getXRPanelHit(event.inputSource, event.frame);
 
-    if (hit) {
-      seekVideoFromXRPanel(hit.canvasX);
+      if (hit) {
+        seekVideoFromXRPanel(hit.canvasX, true);
+      }
+
+      state.timelineSeeking = false;
+      updateTimeline();
     }
 
-    state.timelineSeeking = false;
     state.xrPanelDrag = null;
-    updateTimeline();
+  }
+
+  if (state.xrPendingAction && state.xrPendingAction.inputSource === event.inputSource) {
+    const hit = getXRPanelHit(event.inputSource, event.frame);
+    if (hit && hit.element && hit.element.id === state.xrPendingAction.id) {
+      runXRPanelAction(state.xrPendingAction.id, event.frame);
+    }
+    state.xrPendingAction = null;
   }
 
   state.xrPanelActiveId = "";
   markXRHudDirty();
 }
 
+function handleXRInputSourcesChange(event) {
+  const removedSources = Array.from(event.removed || []);
+  const activeSource = state.xrPanelDrag && state.xrPanelDrag.inputSource;
+  const pendingSource = state.xrPendingAction && state.xrPendingAction.inputSource;
+  if (removedSources.includes(activeSource) || removedSources.includes(pendingSource)) {
+    cancelXRInteraction();
+    markXRHudDirty();
+  }
+}
+
+function cancelXRInteraction() {
+  state.timelineSeeking = false;
+  state.xrPanelDrag = null;
+  state.xrPendingAction = null;
+  state.xrPanelActiveId = "";
+}
+
 function updateXRPanelDrag(frame) {
   if (!state.xrPanelDrag) {
+    return;
+  }
+
+  if (state.xrPanelDrag.type === "panel") {
+    const controllerPosition = getXRInputPosition(state.xrPanelDrag.inputSource, frame);
+    const viewerPosition = getXRViewerPosition(frame);
+
+    if (controllerPosition && viewerPosition && state.xrPanelDrag.initialControllerPosition) {
+      const movement = scaleVec3(
+        subtractVec3(controllerPosition, state.xrPanelDrag.initialControllerPosition),
+        4,
+      );
+      const candidateCenter = addVec3(state.xrPanelDrag.initialPanelCenter, movement);
+      const horizontalOffset = [
+        candidateCenter[0] - viewerPosition[0],
+        0,
+        candidateCenter[2] - viewerPosition[2],
+      ];
+      const horizontalDistance = Math.hypot(horizontalOffset[0], horizontalOffset[2]);
+      const horizontalDirection = horizontalDistance > 0.001
+        ? scaleVec3(horizontalOffset, 1 / horizontalDistance)
+        : scaleVec3(state.xrPanel.normal, -1);
+      const radius = clamp(horizontalDistance, 1.35, 3);
+      const center = [
+        viewerPosition[0] + horizontalDirection[0] * radius,
+        clamp(candidateCenter[1], viewerPosition[1] - 0.85, viewerPosition[1] + 0.35),
+        viewerPosition[2] + horizontalDirection[2] * radius,
+      ];
+      const normal = normalizeVec3([
+        viewerPosition[0] - center[0],
+        0,
+        viewerPosition[2] - center[2],
+      ]);
+
+      state.xrPanel.center = center;
+      state.xrPanel.normal = normal;
+      state.xrPanel.right = normalizeVec3(crossVec3([0, 1, 0], normal));
+      state.xrPanel.up = [0, 1, 0];
+    }
     return;
   }
 
@@ -1953,18 +2473,92 @@ function updateXRPanelDrag(frame) {
   }
 }
 
-function runXRPanelAction(id) {
+function runXRPanelAction(id, frame) {
   if (id === "exit") {
     if (state.xrSession) {
       state.xrSession.end();
     }
+  } else if (id === "hide") {
+    state.xrPanelHidden = true;
+    state.xrPanelHoverId = "";
+    state.xrProjectionMenuOpen = false;
+    state.xrSpeedMenuOpen = false;
+  } else if (id === "recenter") {
+    recenterXRPanel(frame);
+    showXRToast(t("xrHudRecenter"));
   } else if (id === "play-pause") {
     toggleVideoPlayback();
-  } else if (id === "projection-prev") {
-    cycleProjection(-1);
-  } else if (id === "projection-next") {
-    cycleProjection(1);
+  } else if (id === "rewind") {
+    seekVideoBySeconds(-10);
+    showXRToast(t("xrHudRewind"));
+  } else if (id === "forward") {
+    seekVideoBySeconds(10);
+    showXRToast(t("xrHudForward"));
+  } else if (id === "mute") {
+    setMute(!muteInput.checked);
+    showXRToast(muteInput.checked ? t("xrHudMuteOn") : t("xrHudMuteOff"));
+  } else if (id === "loop") {
+    setLoop(!loopInput.checked);
+    showXRToast(loopInput.checked ? t("xrHudLoopOn") : t("xrHudLoopOff"));
+  } else if (id === "flip") {
+    flipInput.checked = !flipInput.checked;
+    showXRToast(t("flip"));
+    markXRHudDirty();
+  } else if (id === "projection-menu") {
+    state.xrProjectionMenuOpen = !state.xrProjectionMenuOpen;
+    state.xrSpeedMenuOpen = false;
+    markXRHudDirty();
+  } else if (id === "speed-menu") {
+    state.xrSpeedMenuOpen = !state.xrSpeedMenuOpen;
+    state.xrProjectionMenuOpen = false;
+    markXRHudDirty();
+  } else if (id.startsWith("projection-option:")) {
+    const projection = id.slice("projection-option:".length);
+    applyProjection(projection, true);
+    state.xrProjectionMenuOpen = false;
+    setStatus(`投影格式已切换为：${projectionSelect.selectedOptions[0].textContent}。`, "success");
+  } else if (id.startsWith("speed-option:")) {
+    const speed = id.slice("speed-option:".length);
+    speedInput.value = speed;
+    video.playbackRate = Number(speed);
+    state.xrSpeedMenuOpen = false;
+    showXRToast(`${t("xrHudSpeed")} ${speedInput.selectedOptions[0].textContent}`);
+    markXRHudDirty();
   }
+}
+
+function recenterXRPanel(frame) {
+  if (!frame || !state.xrReferenceSpace) {
+    return;
+  }
+
+  const pose = frame.getViewerPose(state.xrReferenceSpace);
+  if (!pose || !pose.transform) {
+    return;
+  }
+
+  state.xrPanel = null;
+  ensureXRPanel(pose.transform.matrix);
+}
+
+function showXRToast(text, type = "info") {
+  state.xrToast = {
+    text,
+    type,
+    until: performance.now() + 2200,
+  };
+  markXRHudDirty();
+}
+
+function seekVideoBySeconds(seconds) {
+  if (state.mediaType !== "video" || !state.videoReady || !isFiniteDuration(video.duration)) {
+    return;
+  }
+
+  const maxTime = isFiniteDuration(video.duration) ? video.duration : Math.max(0, video.currentTime + seconds);
+  video.currentTime = clamp((video.currentTime || 0) + seconds, 0, maxTime);
+  state.videoNeedsTextureUpdate = true;
+  updateTimeline();
 }
 
 function cycleProjection(direction) {
@@ -1977,7 +2571,7 @@ function cycleProjection(direction) {
   setStatus(`投影格式已切换为：${option.textContent}。`, "success");
 }
 
-function seekVideoFromXRPanel(canvasX) {
+function seekVideoFromXRPanel(canvasX, commit = false) {
   if (state.mediaType !== "video" || !state.videoReady || !isFiniteDuration(video.duration)) {
     return;
   }
@@ -1989,15 +2583,44 @@ function seekVideoFromXRPanel(canvasX) {
   }
 
   const progress = clamp((canvasX - progressElement.x) / progressElement.width, 0, 1);
+  const now = performance.now();
+  if (!commit && now - state.xrLastScrubSeek < 70) {
+    return;
+  }
+
+  state.xrLastScrubSeek = now;
   state.timelineSeeking = true;
   video.currentTime = video.duration * progress;
   viewerTimelineInput.value = String(Math.round(progress * Number(viewerTimelineInput.max)));
   state.videoNeedsTextureUpdate = true;
-  updateTimeline();
   markXRHudDirty();
 }
 
 function getXRPanelHit(inputSource, frame) {
+  if (state.xrPanelHidden) {
+    return null;
+  }
+
+  const ray = getXRInputRay(inputSource, frame);
+
+  if (!ray) {
+    return null;
+  }
+
+  const hit = getXRPanelRayHit(ray.origin, ray.direction);
+
+  if (!hit) {
+    return null;
+  }
+
+  return {
+    ...hit,
+    worldPoint: addVec3(ray.origin, scaleVec3(ray.direction, hit.distance)),
+    element: getXRPanelElementAt(hit.canvasX, hit.canvasY),
+  };
+}
+
+function getXRInputRay(inputSource, frame) {
   if (!state.xrPanel || !state.xrReferenceSpace || !inputSource || !inputSource.targetRaySpace || !frame) {
     return null;
   }
@@ -2009,22 +2632,39 @@ function getXRPanelHit(inputSource, frame) {
   }
 
   const matrix = pose.transform.matrix;
-  const origin = [matrix[12], matrix[13], matrix[14]];
-  const direction = normalizeVec3([-matrix[8], -matrix[9], -matrix[10]]);
-  const hit = getXRPanelRayHit(origin, direction);
+  return {
+    origin: [matrix[12], matrix[13], matrix[14]],
+    direction: normalizeVec3([-matrix[8], -matrix[9], -matrix[10]]),
+  };
+}
 
-  if (!hit) {
+function getXRInputPosition(inputSource, frame) {
+  const ray = getXRInputRay(inputSource, frame);
+  return ray ? ray.origin : null;
+}
+
+function getXRViewerPosition(frame) {
+  if (!frame || !state.xrReferenceSpace) {
     return null;
   }
 
-  return {
-    ...hit,
-    element: getXRPanelElementAt(hit.canvasX, hit.canvasY),
-  };
+  const pose = frame.getViewerPose(state.xrReferenceSpace);
+
+  if (!pose || !pose.transform) {
+    return null;
+  }
+
+  const matrix = pose.transform.matrix;
+  return [matrix[12], matrix[13], matrix[14]];
 }
 
 function getXRPanelRayHit(origin, direction) {
   const panel = state.xrPanel;
+
+  if (!panel) {
+    return null;
+  }
+
   const denominator = dotVec3(direction, panel.normal);
 
   if (Math.abs(denominator) < 0.0001) {
@@ -2047,6 +2687,7 @@ function getXRPanelRayHit(origin, direction) {
   }
 
   return {
+    distance,
     canvasX: (localX / panel.width + 0.5) * xrHudCanvas.width,
     canvasY: (0.5 - localY / panel.height) * xrHudCanvas.height,
   };
@@ -2058,17 +2699,90 @@ function getXRPanelElementAt(canvasX, canvasY) {
 
     if (canvasX >= element.x && canvasX <= element.x + element.width
       && canvasY >= element.y && canvasY <= element.y + element.height) {
-      return element;
+      return element.enabled === false ? null : element;
     }
   }
 
   return null;
 }
 
+function getXRPointerHits(frame) {
+  if (!state.xrSession || !state.xrPanel || state.xrPanelHidden) {
+    return [];
+  }
+
+  let nextHoverId = "";
+  const pointerHits = Array.from(state.xrSession.inputSources).flatMap((inputSource) => {
+    const ray = getXRInputRay(inputSource, frame);
+
+    if (!ray) {
+      return [];
+    }
+
+    const hit = getXRPanelRayHit(ray.origin, ray.direction);
+    const element = hit ? getXRPanelElementAt(hit.canvasX, hit.canvasY) : null;
+    if (!nextHoverId && element) {
+      nextHoverId = element.id;
+    }
+    const distance = hit ? hit.distance : 3.5;
+    return [{
+      origin: ray.origin,
+      end: addVec3(ray.origin, scaleVec3(ray.direction, Math.min(distance, 3.5))),
+      hit: Boolean(element) || Boolean(hit && hit.canvasY <= 142),
+    }];
+  });
+
+  if (nextHoverId !== state.xrPanelHoverId) {
+    state.xrPanelHoverId = nextHoverId;
+    markXRHudDirty();
+  }
+
+  return pointerHits;
+}
+
+function drawXRPointers({ viewport, projectionMatrix, viewMatrix: xrViewMatrix }) {
+  if (!state.xrPointerHits.length) {
+    return;
+  }
+
+  const vertices = [];
+  state.xrPointerHits.forEach(({ origin, end, hit }) => {
+    const endColor = hit ? [0.23, 0.51, 0.96] : [0.49, 0.71, 1];
+    vertices.push(...origin, 0.49, 0.71, 1, ...end, ...endColor);
+  });
+
+  gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+  gl.useProgram(xrPointerProgram);
+  gl.bindBuffer(gl.ARRAY_BUFFER, xrPointerBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
+  gl.enableVertexAttribArray(xrPointerLocations.position);
+  gl.vertexAttribPointer(xrPointerLocations.position, 3, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(xrPointerLocations.color);
+  gl.vertexAttribPointer(xrPointerLocations.color, 3, gl.FLOAT, false, 24, 12);
+  gl.uniformMatrix4fv(xrPointerLocations.mvp, false, multiplyMat4(projectionMatrix, xrViewMatrix));
+  gl.uniform1f(xrPointerLocations.pointSize, 19);
+  gl.uniform1i(xrPointerLocations.roundPoint, 0);
+  gl.drawArrays(gl.LINES, 0, vertices.length / 6);
+
+  gl.uniform1i(xrPointerLocations.roundPoint, 1);
+  for (let index = 1; index < vertices.length / 6; index += 2) {
+    gl.drawArrays(gl.POINTS, index, 1);
+  }
+}
+
 function renderXRFrame(time, frame) {
   const session = frame.session;
+  if (session !== state.xrSession || !state.xrReferenceSpace || !state.xrBaseLayer) {
+    restoreDesktopFramebuffer();
+    return;
+  }
+
   const pose = frame.getViewerPose(state.xrReferenceSpace);
   state.lastTime = time;
+  if (pose && pose.transform) {
+    ensureXRPanel(pose.transform.matrix);
+  }
+  state.xrPointerHits = getXRPointerHits(frame);
 
   updateVideoTexture();
   updateXRPanelDrag(frame);
@@ -2093,6 +2807,11 @@ function renderXRFrame(time, frame) {
         viewTransformMatrix: view.transform.matrix,
         time,
       });
+      drawXRPointers({
+        viewport,
+        projectionMatrix: view.projectionMatrix,
+        viewMatrix: view.transform.inverse.matrix,
+      });
     });
   }
 
@@ -2111,6 +2830,13 @@ function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.classList.toggle("is-error", type === "error");
   statusEl.classList.toggle("is-success", type === "success");
+  if (state.xrSession) {
+    state.xrToast = {
+      text: message,
+      type: type || "info",
+      until: performance.now() + (type === "error" ? 3600 : 2400),
+    };
+  }
   markXRHudDirty();
 }
 
@@ -2437,6 +3163,29 @@ function fillRoundedRect(context, x, y, width, height, radius) {
   context.fill();
 }
 
+function strokeRoundedRect(context, x, y, width, height, radius, strokeStyle, lineWidth = 1) {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.save();
+  context.strokeStyle = strokeStyle;
+  context.lineWidth = lineWidth;
+  context.beginPath();
+  if (context.roundRect) {
+    context.roundRect(x + lineWidth / 2, y + lineWidth / 2, width - lineWidth, height - lineWidth, r);
+  } else {
+    context.moveTo(x + r, y);
+    context.lineTo(x + width - r, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + r);
+    context.lineTo(x + width, y + height - r);
+    context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    context.lineTo(x + r, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+  }
+  context.stroke();
+  context.restore();
+}
+
 function createSphere(rings, segments) {
   const positions = [];
   const texCoords = [];
@@ -2618,6 +3367,14 @@ function scaleVec3(vector, scale) {
 
 function dotVec3(a, b) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function crossVec3(a, b) {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
 }
 
 function normalizeVec3(vector) {

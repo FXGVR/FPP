@@ -55,21 +55,7 @@
           <section class="control-section view-section" aria-label="画面参数">
             <div class="section-heading">
               <span class="section-index">02</span>
-              <span data-i18n="projection">投影格式</span>
-            </div>
-            <div class="projection-row">
-              <label for="projectionSelect" data-i18n="projection">投影格式</label>
-              <select id="projectionSelect">
-                <option value="erp360" data-i18n="projectionErp360">ERP360 2D（2:1）</option>
-                <option value="erp360-tb" data-i18n="projectionErp360Tb">ERP360 3D 上下（1:1）</option>
-                <option value="vr180" data-i18n="projectionVr180">VR180 2D（1:1）</option>
-                <option value="vr180-sbs" data-i18n="projectionVr180Sbs">VR180 3D 左右（2:1）</option>
-                <option value="flat" data-i18n="projectionFlat">Non VR 普通矩形</option>
-                <option value="flat-sbs" data-i18n="projectionFlatSbs">Non VR 3D 左右</option>
-                <option value="flat-tb" data-i18n="projectionFlatTb">Non VR 3D 上下</option>
-                <option value="eac" data-i18n="projectionEac">EAC 2D（YouTube 3×2）</option>
-                <option value="eac-tb" data-i18n="projectionEacTb">EAC 3D 上下（YouTube 3×2）</option>
-              </select>
+              <span data-i18n="fov">视角宽度</span>
             </div>
             <div class="zoom-row">
               <label for="zoomInput" data-i18n="fov">视角宽度</label>
@@ -152,6 +138,20 @@
           <span class="viewer-live-dot"></span>
         </div>
         <div class="viewer-actions" aria-label="主画面控制">
+          <label class="projection-control" for="projectionSelect">
+            <span data-i18n="projection">投影格式</span>
+            <select id="projectionSelect">
+              <option value="erp360" data-i18n="projectionErp360">ERP360 2D（2:1）</option>
+              <option value="erp360-tb" data-i18n="projectionErp360Tb">ERP360 3D 上下（1:1）</option>
+              <option value="vr180" data-i18n="projectionVr180">VR180 2D（1:1）</option>
+              <option value="vr180-sbs" data-i18n="projectionVr180Sbs">VR180 3D 左右（2:1）</option>
+              <option value="flat" data-i18n="projectionFlat">Non VR 普通矩形</option>
+              <option value="flat-sbs" data-i18n="projectionFlatSbs">Non VR 3D 左右</option>
+              <option value="flat-tb" data-i18n="projectionFlatTb">Non VR 3D 上下</option>
+              <option value="eac" data-i18n="projectionEac">EAC 2D（YouTube 3×2）</option>
+              <option value="eac-tb" data-i18n="projectionEacTb">EAC 3D 上下（YouTube 3×2）</option>
+            </select>
+          </label>
           <button id="resetButton" type="button" data-i18n="reset">重置视角</button>
           <label class="toggle viewer-mute-toggle">
             <input id="muteInput" type="checkbox" autocomplete="off">
