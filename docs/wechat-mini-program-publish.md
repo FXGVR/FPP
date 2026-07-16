@@ -108,7 +108,7 @@ Page({
     "pages/player/player"
   ],
   "window": {
-    "navigationBarTitleText": "FXGVR 媒体查看器"
+    "navigationBarTitleText": "FXGVR 媒体播放器"
   }
 }
 ```
@@ -199,4 +199,3 @@ web-view 外壳 + HTTPS fpp.html + URL 参数播放
 ```
 
 只有在 `web-view` 体验或审核限制影响业务时，才建议投入重写原生小程序播放器。
-

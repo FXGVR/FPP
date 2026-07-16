@@ -13,3 +13,4 @@ test-assets/
 # Logs and temporary files
 *.log
 *.tmp
+outputs/

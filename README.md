@@ -1,4 +1,4 @@
-# FXG 轻量360全景媒体查看器
+# FXG 轻量360全景媒体播放器
 
 这是一个纯HTML文件（90k/gz后仅20k）零依赖的静态网页全景查看器，
 完全绿色开源(https://github.com/FXGVR/FPP)
@@ -43,7 +43,7 @@ node build-fp.js
 
 `fpp.html` 会内联 CSS 和 JS，并做保守压缩：压缩 HTML/CSS 空白，移除 JS 注释和缩进，但不改变量名，降低尺寸同时尽量避免破坏 WebGL shader、正则和模板字符串。
 
-版本备份约定：新增功能时提升版本号，并把修改前版本备份到 `OldVersion/<version>/`；修 bug 不提升版本号，也不新增备份。当前 `OldVersion/1.2.1/` 到 `OldVersion/1.2.7/` 已保留，当前开发线为 `1.2.8`。
+版本归档约定：当前 `OldVersion/1.2.1/` 到 `OldVersion/1.2.7/` 作为历史快照保留；新版本改用 GitHub Releases 归档，不再新增 `OldVersion/<version>/` 目录。当前开发线为 `1.2.8`。提交与发布规则见 `docs/git-release-policy.md`。
 
 `1.2.8` 在保持媒体加载、投影、播放控制、触摸/键盘操作、陀螺仪、全屏和 WebXR 行为不变的前提下，更新为更简洁的现代化界面：以沉浸式深色画布为视觉中心，使用中性浅色控制侧栏和单一蓝色强调色，并优化桌面与移动端的参数分组、画面浮层、焦点状态及响应式布局。
 
