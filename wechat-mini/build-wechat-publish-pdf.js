@@ -21,8 +21,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Preformatted, Spacer, KeepTogether
 
-source = Path("${path.join(root, "panorama-viewer/docs/wechat-mini-program-publish.md")}")
-output = Path("${path.join(root, "panorama-viewer/docs/FXGVR-fpp-html-wechat-mini-program-publish.pdf")}")
+source = Path("${path.join(root, "panorama-viewer/wechat-mini/wechat-mini-program-publish.md")}")
+output = Path("${path.join(root, "panorama-viewer/wechat-mini/FXGVR-fpp-html-wechat-mini-program-publish.pdf")}")
 font_path = "/System/Library/Fonts/STHeiti Light.ttc"
 font_bold_path = "/System/Library/Fonts/STHeiti Medium.ttc"
 
