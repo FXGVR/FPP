@@ -1,12 +1,11 @@
-## FPP(FXG Pano Player)一个纯HTML全景媒体播放器
-这是一个纯HTML文件（fpp.html 约100k源码/gz后仅下载20k）全景查看器
-特点：
+## FPP(FXG Pano Player)纯HTML全景媒体播放器
+这是一个纯HTML文件（fpp.html 约100k源码/gz后仅下载20k）功能完善的全景媒体查看器
+## 特点：
 1.功能强大零依赖，绿色开源(https://github.com/FXGVR/FPP)
 2.支持各种全景投影 ERP/EAC的360/180度视频/图片，支持各种3D格式（SBS左右/Updown）
 3.完善的WebXR沉浸式播放器
 4.全平台兼容：支持XR/VisionPro/Pico/Quest/电脑Win/Mac/手机iOS/Android/平板等
 5.一个链接全平台播放
-
 可以作为本地视频播放器打开本地媒体（或者拖拽文件进入窗口），
 也可以通过 ?URL= 播放在线视频/直播/图片
 
