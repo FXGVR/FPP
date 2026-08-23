@@ -5,8 +5,8 @@
 - 提交只包含本次功能、修复或文档更新相关文件。
 - 不提交本地生成物、临时资料和导出材料，尤其是 `outputs/`。
 - `wechat-mini/` 是微信小程序发布资料目录，只作为仓库内参考资料维护，不作为 GitHub Release 发布资产上传。
-- 修改 `index.html`、`styles.css` 或 `app.js` 后，提交前重新运行 `node build-fp.js`，确保 `fpp.html` 已同步更新。
-- 如果维护预压缩部署文件，提交前同步更新 `fpp.html.gz`。
+- 修改 `index.html`、`styles.css` 或 `app.js` 后，提交前运行 `npm run build`，确保 `fpp.html` 和 `fpp.html.gz` 已同步更新。
+- 提交前运行 `npm run check`，该命令会检查源码语法和两个发布产物是否一致。
 - 提交信息使用简洁的 `type: summary` 格式，例如：
   - `feat: improve XR playback panel`
   - `fix: handle video seek state`
@@ -36,7 +36,9 @@
 ```sh
 git tag v1.2.8
 git push origin v1.2.8
-gh release create v1.2.8 fpp.html fpp.html.gz --title "v1.2.8" --generate-notes
+gh release create v1.2.8 --title "v1.2.8" --generate-notes
 ```
+
+创建并发布 Release 后，GitHub Actions 会自动验证源码和发布产物，并上传 `fpp.html`、`fpp.html.gz` 两个资产。
 
 如果还没有安装或登录 GitHub CLI，使用 GitHub 网页端创建 release 即可。
