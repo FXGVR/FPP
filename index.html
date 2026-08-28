@@ -19,6 +19,9 @@
               <h1 data-i18n="appTitle">FXG 全景图片/视频播放器</h1>
             </div>
             <button id="languageButton" class="language-button" type="button" aria-label="切换中英文">中/E</button>
+            <button id="panelClose" class="panel-close" type="button" aria-label="收起面板" data-i18n-aria-label="closePanel">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           </div>
           <p class="lede" data-i18n="lede">
             支持 2:1 ERP 图片、360 视频、本地文件和 URL。拖动看四周，滚轮缩放视角。
@@ -28,8 +31,7 @@
         <div class="panel-content">
           <section class="control-section media-section" aria-label="媒体加载控制">
             <div class="section-heading">
-              <span class="section-index">01</span>
-              <span data-i18n="openLocal">打开本地文件</span>
+              <span data-i18n="secMedia">打开媒体</span>
             </div>
             <div class="controls">
               <label class="file-button">
@@ -54,8 +56,7 @@
 
           <section class="control-section view-section" aria-label="画面参数">
             <div class="section-heading">
-              <span class="section-index">02</span>
-              <span data-i18n="fov">视角宽度</span>
+              <span data-i18n="secView">视角</span>
             </div>
             <div class="zoom-row">
               <label for="zoomInput" data-i18n="fov">视角宽度</label>
@@ -66,8 +67,7 @@
 
           <section class="control-section settings-section" aria-label="播放与设备参数">
             <div class="section-heading">
-              <span class="section-index">03</span>
-              <span data-i18n="speed">速度</span>
+              <span data-i18n="secPlay">播放</span>
             </div>
             <div class="video-panel" aria-label="视频播放参数">
               <div class="video-actions">
@@ -87,6 +87,8 @@
               </div>
             </div>
 
+            <details class="more-settings">
+              <summary data-i18n="moreSettings">更多设置</summary>
             <div class="quick-actions" aria-label="视角参数">
               <button id="gyroButton" type="button" data-i18n="gyro">陀螺仪</button>
               <label class="select-control" for="xrScaleSelect" title="倍率越高越清晰，也越消耗 Quest 性能" data-i18n-title="xrClarityTitle">
@@ -107,6 +109,7 @@
                 <span data-i18n="flip">水平翻转</span>
               </label>
             </div>
+            </details>
           </section>
 
           <details class="help-panel">
@@ -127,7 +130,7 @@
           <p id="status" class="status" role="status" aria-live="polite" data-i18n="defaultStatus">
             已载入内置测试全景。换一张图片或 360 ERP 视频试试，入口就在上面。
           </p>
-          <span class="version">v1.2.8</span>
+          <span class="version">v1.3.0</span>
         </footer>
       </section>
 
@@ -137,6 +140,9 @@
           <span class="viewer-brand">FXGVR</span>
           <span class="viewer-live-dot"></span>
         </div>
+        <button id="panelToggle" class="panel-toggle" type="button" aria-label="打开设置面板" data-i18n-aria-label="openPanel">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h9M16 6h1M3 10h3M10 10h7M3 14h11M18 14h-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="14" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="10" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="16" cy="14" r="2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+        </button>
         <div class="viewer-actions" aria-label="主画面控制">
           <label class="projection-control" for="projectionSelect">
             <span data-i18n="projection">投影格式</span>
@@ -172,6 +178,15 @@
         <button id="viewerPlayButton" class="viewer-play-button" type="button" disabled aria-label="播放或暂停视频" data-i18n-aria-label="playPauseVideo">
           <span class="play-icon" aria-hidden="true"></span>
         </button>
+        <div id="viewerLoading" class="viewer-loading" aria-hidden="true">
+          <span class="loading-ring"></span>
+          <span class="loading-text" data-i18n="loadingMedia">正在载入媒体…</span>
+        </div>
+        <button id="playOverlay" class="play-overlay" type="button" aria-label="播放视频" data-i18n-aria-label="playVideo">
+          <span class="play-overlay-circle" aria-hidden="true"><span class="play-overlay-icon"></span></span>
+          <span class="play-overlay-hint" data-i18n="tapToPlay">轻点播放</span>
+        </button>
+        <div id="viewerToast" class="viewer-toast" role="status" aria-live="polite"></div>
       </section>
     </main>
 

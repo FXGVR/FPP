@@ -29,6 +29,11 @@ const statusEl = document.querySelector("#status");
 const dropOverlay = document.querySelector("#dropOverlay");
 const viewerCard = document.querySelector(".viewer-card");
 const viewerPlayButton = document.querySelector("#viewerPlayButton");
+const panelToggle = document.querySelector("#panelToggle");
+const panelClose = document.querySelector("#panelClose");
+const playOverlay = document.querySelector("#playOverlay");
+const viewerToast = document.querySelector("#viewerToast");
+const viewerLoading = document.querySelector("#viewerLoading");
 
 const translations = {
   zh: {
@@ -36,6 +41,10 @@ const translations = {
     lede: "支持 2:1 ERP 图片、360 视频、本地文件和 URL。拖动看四周，滚轮缩放视角。",
     openLocal: "打开本地文件",
     openUrl: "打开 URL",
+    secMedia: "打开媒体",
+    secView: "视角",
+    secPlay: "播放",
+    moreSettings: "更多设置（陀螺仪 / XR / 旋转 / 翻转）",
     urlPlaceholder: "https://example.com/panorama.mp4",
     fov: "视角宽度",
     projection: "投影格式",
@@ -71,6 +80,7 @@ const translations = {
     defaultStatus: "已载入内置测试全景。换一张图片或 360 ERP 视频试试，入口就在上面。",
     reset: "重置视角",
     fullscreen: "全屏",
+    exitFullscreen: "返回",
     enterXr: "进入 XR",
     exitXr: "退出 XR",
     xrHudTitle: "XR 参数面板",
@@ -108,12 +118,20 @@ const translations = {
     pauseVideo: "暂停视频",
     playPauseVideo: "播放或暂停视频",
     langButton: "中/E",
+    openPanel: "打开设置面板",
+    closePanel: "收起面板",
+    tapToPlay: "轻点播放",
+    loadingMedia: "正在载入媒体…",
   },
   en: {
     appTitle: "FXG Panorama Image/Video Player",
     lede: "Supports 2:1 ERP images, 360 video, local files, and URLs. Drag to look around, scroll to zoom the field of view.",
     openLocal: "Open Local File",
     openUrl: "Open URL",
+    secMedia: "Open Media",
+    secView: "View",
+    secPlay: "Playback",
+    moreSettings: "More (Gyro / XR / Rotate / Flip)",
     urlPlaceholder: "https://example.com/panorama.mp4",
     fov: "Field of View",
     projection: "Projection",
@@ -149,6 +167,7 @@ const translations = {
     defaultStatus: "Built-in panorama loaded. Open an image or 360 ERP video above.",
     reset: "Reset View",
     fullscreen: "Fullscreen",
+    exitFullscreen: "Back",
     enterXr: "Enter XR",
     exitXr: "Exit XR",
     xrHudTitle: "XR Control Panel",
@@ -186,11 +205,20 @@ const translations = {
     pauseVideo: "Pause video",
     playPauseVideo: "Play or pause video",
     langButton: "中/E",
+    openPanel: "Open settings panel",
+    closePanel: "Collapse panel",
+    tapToPlay: "Tap to Play",
+    loadingMedia: "Loading media…",
   },
 };
 
 const video = document.createElement("video");
 video.playsInline = true;
+video.setAttribute("playsinline", "");
+video.setAttribute("webkit-playsinline", "");
+video.setAttribute("x5-video-player-type", "h5-page");
+video.setAttribute("x5-video-player-fullscreen", "false");
+video.setAttribute("x-webkit-airplay", "allow");
 video.preload = "auto";
 video.crossOrigin = "anonymous";
 
@@ -249,13 +277,16 @@ const state = {
   xrToast: null,
   xrLastScrubSeek: 0,
   xrPointerHits: [],
-  fullscreenOnLoad: false,
-  fullscreenRequested: false,
+  immersive: false,
+  panelOpen: false,
   muteRequestedByQuery: false,
   loopRequestedByQuery: false,
   projectionHint: "",
   language: localStorage.getItem("fxgvr-language") || "zh",
 };
+
+let chromeIdleTimer = 0;
+let toastTimer = 0;
 
 const limits = {
   minFov: Number(zoomInput.min),
@@ -545,10 +576,22 @@ function bindEvents() {
   });
 
   resetButton.addEventListener("click", resetView);
-  fullscreenButton.addEventListener("click", toggleFullscreen);
+  fullscreenButton.addEventListener("click", toggleImmersiveMode);
   xrButton.addEventListener("click", toggleXR);
   gyroButton.addEventListener("click", toggleGyro);
   viewerPlayButton.addEventListener("click", toggleVideoPlayback);
+  panelToggle.addEventListener("click", () => setPanelOpen(true));
+  panelClose.addEventListener("click", () => setPanelOpen(false));
+  playOverlay.addEventListener("click", () => {
+    hidePlayOverlay();
+
+    if (state.mediaType === "video") {
+      video.play().catch(() => {});
+    }
+  });
+  ["pointermove", "pointerdown", "wheel", "touchstart"].forEach((type) => {
+    viewerCard.addEventListener(type, scheduleChromeIdle, { passive: true });
+  });
   muteInput.addEventListener("change", () => {
     setMute(muteInput.checked);
   });
@@ -652,8 +695,15 @@ function bindEvents() {
     state.videoNeedsTextureUpdate = true;
     updateTimeline();
   });
-  video.addEventListener("play", updatePlaybackButton);
-  video.addEventListener("pause", updatePlaybackButton);
+  video.addEventListener("play", () => {
+    hidePlayOverlay();
+    updatePlaybackButton();
+    scheduleChromeIdle();
+  });
+  video.addEventListener("pause", () => {
+    updatePlaybackButton();
+    scheduleChromeIdle();
+  });
   video.addEventListener("ended", updatePlaybackButton);
   video.addEventListener("loadeddata", () => {
     initializeVideoTexture();
@@ -662,6 +712,8 @@ function bindEvents() {
     initializeVideoTexture();
   }, { once: false });
   video.addEventListener("error", () => {
+    hideViewerLoading();
+    hidePlayOverlay();
     const message = video.error ? getVideoErrorMessage(video.error) : "视频载入失败。";
     setStatus(message, "error");
     resetVideoControls(false);
@@ -778,6 +830,7 @@ function applyLanguage(language) {
   updateGyroButton();
   updateXRButtonText();
   updatePlaybackButton();
+  updateFullscreenButton();
   markXRHudDirty();
 }
 
@@ -877,6 +930,18 @@ function handleKeydown(event) {
   }
 
   const step = event.shiftKey ? 0.16 : 0.07;
+
+  if (event.key === "Escape" && state.immersive) {
+    if (state.panelOpen) {
+      setPanelOpen(false);
+    } else {
+      exitImmersiveMode();
+      setStatus("已退出沉浸全屏，控制面板已恢复。", "success");
+    }
+
+    event.preventDefault();
+    return;
+  }
 
   if (event.key === "ArrowLeft") {
     state.targetYaw -= step;
@@ -991,6 +1056,7 @@ function loadUrlImage(url) {
   image.crossOrigin = "anonymous";
   image.referrerPolicy = "no-referrer";
   image.onload = () => {
+    hideViewerLoading();
     try {
       loadImageTexture(image, `URL 图片：${parsedUrl.href}`, parsedUrl.href);
     } catch (error) {
@@ -998,8 +1064,10 @@ function loadUrlImage(url) {
     }
   };
   image.onerror = () => {
+    hideViewerLoading();
     setStatus("URL 图片载入失败。常见原因是链接不是图片、服务器禁止跨域访问，或图片需要登录。", "error");
   };
+  showViewerLoading();
   image.src = parsedUrl.href;
   setStatus("正在载入 URL 图片 ...");
 }
@@ -1010,7 +1078,6 @@ function loadMediaFromQuery() {
   const videoUrl = params.get("video");
   const mediaUrl = videoUrl || imageUrl || params.get("url") || params.get("URL");
   const projectionParam = params.get("projection");
-  const fullscreenParam = params.get("fullscreen");
   const muteParam = params.get("isMute");
   const loopParam = params.get("isLoop");
 
@@ -1023,7 +1090,6 @@ function loadMediaFromQuery() {
     }
   }
 
-  state.fullscreenOnLoad = isTruthyQueryValue(fullscreenParam);
   state.muteRequestedByQuery = muteParam === null ? true : isTruthyQueryValue(muteParam);
   state.loopRequestedByQuery = loopParam === null ? true : isTruthyQueryValue(loopParam);
   setMute(state.muteRequestedByQuery);
@@ -1033,6 +1099,7 @@ function loadMediaFromQuery() {
     return;
   }
 
+  enterImmersiveMode();
   urlInput.value = mediaUrl;
 
   if (videoUrl || guessMediaTypeFromUrl(mediaUrl) === "video") {
@@ -1075,8 +1142,8 @@ function loadImageTexture(image, label, sourceName = label) {
     : "";
   const qualityHint = getImmersiveSourceQualityHint(source.width, source.height);
 
+  enterImmersiveMode();
   setStatus(`${label} 已载入，原始尺寸 ${width}×${height}。${scaleHint}${ratioHint}${qualityHint}`, "success");
-  enterFullscreenOnLoad();
 }
 
 function loadVideoSource(src, label, shouldRevokeObjectUrl, autoplay = false, sourceName = label) {
@@ -1108,6 +1175,7 @@ function loadVideoSource(src, label, shouldRevokeObjectUrl, autoplay = false, so
   video.src = src;
   video.load();
 
+  showViewerLoading();
   setStatus(`${label} 正在载入 ...`);
 }
 
@@ -1120,11 +1188,13 @@ function initializeVideoTexture() {
     replaceTexture(createTexture(video));
   } catch (error) {
     state.videoUploadFailed = true;
+    hideViewerLoading();
     setStatus(`视频已载入但不能用于 WebGL：${error.message}。URL 视频通常需要服务器允许 CORS。`, "error");
     resetVideoControls(false);
     return;
   }
 
+  hideViewerLoading();
   state.videoReady = true;
   state.videoNeedsTextureUpdate = true;
   state.mediaInfo = {
@@ -1146,7 +1216,7 @@ function initializeVideoTexture() {
 
   const loadedMessage = `${state.mediaInfo.label} 已载入，尺寸 ${video.videoWidth}×${video.videoHeight}。${ratioHint}${qualityHint}`;
   setStatus(loadedMessage, "success");
-  enterFullscreenOnLoad();
+  enterImmersiveMode();
 
   if (state.videoAutoplayOnReady) {
     state.videoAutoplayOnReady = false;
@@ -1159,7 +1229,8 @@ function attemptAutoplay(successMessage) {
     setStatus(successMessage, "success");
   }).catch(() => {
     if (muteInput.checked) {
-      setStatus(`${successMessage} 浏览器需要你点击画面左下角播放按钮才能开始。`, "success");
+      showPlayOverlay();
+      setStatus(`${successMessage} 浏览器需要你点击画面播放按钮才能开始。`, "success");
       return;
     }
 
@@ -1167,7 +1238,8 @@ function attemptAutoplay(successMessage) {
     video.play().then(() => {
       setStatus(`${successMessage} 浏览器限制非静音自动播放，已自动切换为静音播放。`, "success");
     }).catch(() => {
-      setStatus(`${successMessage} 浏览器需要你点击画面左下角播放按钮才能开始。`, "success");
+      showPlayOverlay();
+      setStatus(`${successMessage} 浏览器需要你点击画面播放按钮才能开始。`, "success");
     });
   });
 }
@@ -1176,6 +1248,8 @@ function stopVideoSource() {
   video.pause();
   video.removeAttribute("src");
   video.load();
+  hideViewerLoading();
+  hidePlayOverlay();
 
   if (state.videoObjectUrl) {
     URL.revokeObjectURL(state.videoObjectUrl);
@@ -2031,39 +2105,104 @@ function setZoom(value) {
   markXRHudDirty();
 }
 
-function toggleFullscreen() {
-  const target = document.querySelector(".viewer-card");
+function updateFullscreenButton() {
+  fullscreenButton.textContent = state.immersive ? t("exitFullscreen") : t("fullscreen");
+}
 
-  if (!document.fullscreenElement) {
-    if (!target.requestFullscreen) {
-      setStatus("这个浏览器暂时不支持全屏 API。", "error");
-      return;
-    }
+function toggleImmersiveMode() {
+  if (state.immersive) {
+    exitImmersiveMode();
+    setStatus("已退出沉浸全屏，控制面板已恢复。", "success");
+    return;
+  }
 
-    target.requestFullscreen().catch(() => {
-      setStatus("浏览器没有允许进入全屏。", "error");
-    });
-  } else if (document.exitFullscreen) {
-    document.exitFullscreen();
+  enterImmersiveMode();
+  setStatus("已进入沉浸全屏：面板已隐藏，控件会在无操作时自动淡出。再点一次「返回」或按 Esc 恢复。", "success");
+}
+
+function enterImmersiveMode() {
+  if (state.immersive) {
+    return;
+  }
+
+  state.immersive = true;
+  document.body.classList.add("immersive");
+  updateFullscreenButton();
+  requestAnimationFrame(() => {
+    resizeCanvas();
+    scheduleChromeIdle();
+  });
+}
+
+function setPanelOpen(open) {
+  state.panelOpen = open;
+  document.body.classList.toggle("panel-open", open);
+
+  if (open) {
+    clearTimeout(chromeIdleTimer);
+    document.body.classList.remove("chrome-idle");
+  } else {
+    scheduleChromeIdle();
   }
 }
 
-function enterFullscreenOnLoad() {
-  if (!state.fullscreenOnLoad || state.fullscreenRequested || document.fullscreenElement) {
+function scheduleChromeIdle() {
+  if (!state.immersive || state.panelOpen) {
     return;
   }
 
-  state.fullscreenRequested = true;
-  const target = document.querySelector(".viewer-card");
+  document.body.classList.remove("chrome-idle");
+  clearTimeout(chromeIdleTimer);
+  chromeIdleTimer = window.setTimeout(() => {
+    if (state.panelOpen || (state.mediaType === "video" && video.paused)) {
+      return;
+    }
 
-  if (!target.requestFullscreen) {
-    setStatus("当前浏览器不支持自动全屏。", "error");
+    document.body.classList.add("chrome-idle");
+  }, 3200);
+}
+
+function exitImmersiveMode() {
+  if (!state.immersive) {
     return;
   }
 
-  target.requestFullscreen().catch(() => {
-    setStatus("浏览器阻止了自动全屏，请手动点击全屏按钮。", "error");
-  });
+  state.immersive = false;
+  state.panelOpen = false;
+  document.body.classList.remove("immersive", "panel-open", "chrome-idle");
+  clearTimeout(chromeIdleTimer);
+  updateFullscreenButton();
+  requestAnimationFrame(resizeCanvas);
+}
+
+function showPlayOverlay() {
+  playOverlay.classList.add("is-visible");
+}
+
+function hidePlayOverlay() {
+  playOverlay.classList.remove("is-visible");
+}
+
+function showViewerLoading() {
+  viewerLoading.classList.add("is-visible");
+}
+
+function hideViewerLoading() {
+  viewerLoading.classList.remove("is-visible");
+}
+
+function showViewerToast(message, type) {
+  if (!state.immersive || !message) {
+    return;
+  }
+
+  viewerToast.textContent = message;
+  viewerToast.classList.toggle("is-error", type === "error");
+  viewerToast.classList.add("is-visible");
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    viewerToast.classList.remove("is-visible");
+  }, type === "error" ? 5200 : 3400);
 }
 
 function checkGyroSupport() {
@@ -2830,6 +2969,7 @@ function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.classList.toggle("is-error", type === "error");
   statusEl.classList.toggle("is-success", type === "success");
+  showViewerToast(message, type);
   if (state.xrSession) {
     state.xrToast = {
       text: message,

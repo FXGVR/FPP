@@ -22,7 +22,7 @@
 1. 在 `main` 完成功能、文档和构建产物更新。
 2. 确认 `git status` 中没有 `outputs/` 或其他本地生成物。
 3. 提交并推送到 GitHub。
-4. 为发布提交创建版本标签，例如 `v1.2.8`。
+4. 为发布提交创建版本标签，例如 `v1.3.0`。
 5. 在 GitHub Releases 中基于该标签创建 release。
 6. Release notes 可使用 GitHub 自动生成后再手动补充重点变化。
 7. 上传发布资产，仅包括：
@@ -34,9 +34,9 @@
 可选 CLI 流程：
 
 ```sh
-git tag v1.2.8
-git push origin v1.2.8
-gh release create v1.2.8 fpp.html fpp.html.gz --title "v1.2.8" --generate-notes
+git tag v1.3.0
+git push origin v1.3.0
+gh release create v1.3.0 fpp.html fpp.html.gz --title "v1.3.0" --generate-notes
 ```
 
 如果还没有安装或登录 GitHub CLI，使用 GitHub 网页端创建 release 即可。
