@@ -3145,7 +3145,7 @@ function getImmersiveSourceQualityHint(width, height) {
 function guessMediaTypeFromUrl(url) {
   const cleanUrl = url.split("?")[0].split("#")[0].toLowerCase();
 
-  if (/\.(mp4|m4v|webm|mov|ogv|ogg)$/.test(cleanUrl)) {
+  if (/\.(mp4|m4v|webm|mov|ogv|ogg|m3u8)$/.test(cleanUrl)) {
     return "video";
   }
 
